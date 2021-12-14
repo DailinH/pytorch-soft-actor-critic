@@ -1,3 +1,6 @@
 __pycache__/
 runs/
 .idea
+*.pkl
+*.log
+*.out
