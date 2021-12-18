@@ -1,0 +1,3 @@
+[submodule "real-nvp"]
+	path = real-nvp
+	url = git@github.com:chrischute/real-nvp.git

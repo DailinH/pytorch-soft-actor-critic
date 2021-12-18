@@ -71,11 +71,10 @@ class CBSAC(object):
         optim.step()
         print("rho",rho[0])
 
-        temp_density_model.eval()
         # inference s_tp1
         with torch.no_grad():
+            temp_density_model.eval()
             x, _ = temp_density_model.forward(s_tp1, reverse=True)
-            print(x.shape)
             rho_ = prior.log_prob(x)
             print("rho_", rho_[0])
         

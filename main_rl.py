@@ -5,8 +5,8 @@ import numpy as np
 import itertools
 import torch
 from sac import SAC
-# from cbsac_realnvp import CBSAC
-from cbsac_simhash import CBSAC
+from cbsac_realnvp import CBSAC
+# from cbsac_simhash import CBSAC
 from torch.utils.tensorboard import SummaryWriter
 from replay_memory import ReplayMemory
 

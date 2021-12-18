@@ -7,7 +7,13 @@ class AffineCouplingLayer(nn.Module):
     def __init__(self, input_dim, hidden_dim, mask):
         super(AffineCouplingLayer, self).__init__()
         self.mask = mask
-        self.net = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.LeakyReLU(), nn.Linear(hidden_dim, hidden_dim), nn.LeakyReLU(), nn.Linear(hidden_dim, 2*input_dim))
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim), 
+            nn.LeakyReLU(), 
+            nn.Linear(hidden_dim, hidden_dim), 
+            nn.LeakyReLU(), 
+            nn.Linear(hidden_dim, 2*input_dim)
+        )
 
     def forward(self, input, reverse=False):
         x0 = torch.mul(input, self.mask)
@@ -31,11 +37,14 @@ class AffineCouplingLayer(nn.Module):
 class Net(nn.Module):
     def __init__(self, N, input_dim, hidden_dim, device):
         super(Net, self).__init__()
-        self.n = N
+        self.n = 4
         self.device = device
-        mask_checkerboard = np.indices((input_dim, input_dim)).sum(axis=0)%2
-        mask_checkerboard = np.append(mask_checkerboard,mask_checkerboard, axis=0)
-        print("input dim", N, input_dim, mask_checkerboard)
+        mask_checkerboard = np.indices((1, input_dim)).sum(axis=0)%2
+
+        mask_checkerboard = np.append(mask_checkerboard,1 - mask_checkerboard,axis=0)
+        mask_checkerboard = np.append(mask_checkerboard, mask_checkerboard, axis=0)
+        mask_checkerboard = np.append(mask_checkerboard, 1 - mask_checkerboard, axis=0)
+        # print("input dim", N, input_dim, mask_checkerboard)
 
         self.masks = torch.Tensor(mask_checkerboard).to(self.device)
         self.layers = nn.ModuleList([AffineCouplingLayer(input_dim=input_dim, hidden_dim=hidden_dim, mask=self.masks[i]) for i in range(self.n)])
@@ -45,6 +54,7 @@ class Net(nn.Module):
         log_det_loss = torch.zeros(input.size()[0]).to(self.device)
         z = input
         index_range = range(self.n) if not reverse else range(self.n-1, -1 , -1)
+        # print(z, reverse)
         for idx in index_range:
             z, log_det = self.layers[idx](z, reverse)
             log_det_loss += log_det
