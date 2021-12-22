@@ -4,10 +4,12 @@ import gym
 import numpy as np
 import itertools
 import torch
-from dril import DRIL
+from dril_nvp import DRIL
 from torch.utils.tensorboard import SummaryWriter
 from replay_memory import ReplayMemory
 import pickle
+import warnings
+warnings.filterwarnings('ignore')
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
 parser.add_argument('--env-name', default="HalfCheetah-v2",
@@ -66,13 +68,12 @@ agent = DRIL(env.observation_space.shape[0], env.action_space, args)
 if args.load is not None:
     agent.load_checkpoint(args.load, evaluate=True)
 
-writer = SummaryWriter('runs/{}_DRIL_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
+writer = SummaryWriter('runs/{}/DRIL/{}'.format(args.env_name, datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
 
 
 # Memory
 memory = ReplayMemory(args.replay_size, args.seed)
-expert_memory = pickle.load(open('teacher/sac_trained_halfcheetahv2_20000.pkl', 'rb'))
+expert_memory = pickle.load(open('teacher/sac_trained.pkl', 'rb'))
 
 # Training Loop
 total_numsteps = 0
@@ -94,8 +95,9 @@ for i_episode in itertools.count(1):
             # Number of updates per step in environment
             for i in range(args.updates_per_step):
                 # Update parameters of all the networks
-                critic_1_loss, critic_2_loss, rl_policy_loss, ent_loss, alpha = agent.update_parameters_rl(memory, args.batch_size, updates)
-                il_policy_loss = agent.update_parameters_il(expert_memory)
+                discriminator_threshold = 0.2
+                critic_1_loss, critic_2_loss, rl_policy_loss, ent_loss, alpha, il_update_len = agent.update_parameters_rl(memory, args.batch_size, updates, discriminator_threshold)
+                il_policy_loss = agent.update_parameters_il(expert_memory, il_update_len)
                 writer.add_scalar('loss/critic_1', critic_1_loss, updates)
                 writer.add_scalar('loss/critic_2', critic_2_loss, updates)
                 writer.add_scalar('loss/policy_rl', rl_policy_loss, updates)
