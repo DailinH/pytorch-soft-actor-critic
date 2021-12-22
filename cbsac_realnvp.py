@@ -1,12 +1,15 @@
 import os
 import torch
+from torch import distributions
+from torch import nn
 import torch.nn.functional as F
 from torch.optim import Adam
 from utils import soft_update, hard_update
 from model import GaussianPolicy, QNetwork, DeterministicPolicy
 from torch.distributions import MultivariateNormal
-from realnvp_layers import Net, AffineCouplingLayer
+from realnvp_layers import RealNVP
 import copy
+import numpy as np
 
 class CBSAC(object):
     def __init__(self, num_inputs, action_space, args):
@@ -27,15 +30,23 @@ class CBSAC(object):
         self.critic_target = QNetwork(num_inputs, action_space.shape[0], args.hidden_size).to(self.device)
         hard_update(self.critic_target, self.critic)
 
-        self.prior = MultivariateNormal(torch.zeros(num_inputs), torch.eye(num_inputs))
+        self.prior = MultivariateNormal(torch.zeros(num_inputs).to(self.device), torch.eye(num_inputs).to(self.device))
         # print(num_inputs)
-        self.density_model = Net(N=num_inputs*2, input_dim=num_inputs, hidden_dim=256, device=self.device).to(self.device)
-        self.density_optim = torch.optim.Adam(self.density_model.parameters(), lr=args.lr, weight_decay=5e-4)
+        nets = lambda: nn.Sequential(nn.Linear(num_inputs, 256), nn.LeakyReLU(), nn.Linear(256, 256), nn.LeakyReLU(), nn.Linear(256, num_inputs), nn.Tanh())
+        nett = lambda: nn.Sequential(nn.Linear(num_inputs, 256), nn.LeakyReLU(), nn.Linear(256, 256), nn.LeakyReLU(), nn.Linear(256, num_inputs))
+        # self.density_model = Net(N=num_inputs*2, input_dim=num_inputs, hidden_dim=256, device=self.device).to(self.device)
+        # self.density_optim = torch.optim.Adam(self.density_model.parameters(), lr=args.lr, weight_decay=5e-4)
+        prior = distributions.MultivariateNormal(torch.zeros(num_inputs).to(self.device), torch.eye(num_inputs).to(self.device))
+        mask_checkerboard = np.indices((1, num_inputs)).sum(axis=0)%2
+        mask_checkerboard = np.append(mask_checkerboard,1 - mask_checkerboard,axis=0)
+        masks = torch.from_numpy(np.array(list(mask_checkerboard)*3).astype(np.float32)).to(self.device)
+        self.flow = RealNVP(nets, nett, masks, prior).to(self.device)
+        self.optimizer = torch.optim.Adam([p for p in self.flow.parameters() if p.requires_grad==True], lr=1e-4)
 
-        if args.load_density_model:
-            density_model_ckpt = torch.load(args.density_model_dir)
-            self.density_model.load_state_dict(density_model_ckpt['net'])
-            self.density_optim.load_state_dict(density_model_ckpt['optim'])
+        # if args.load_density_model:
+        #     density_model_ckpt = torch.load(args.density_model_dir)
+        #     self.density_model.load_state_dict(density_model_ckpt['net'])
+        #     self.density_optim.load_state_dict(density_model_ckpt['optim'])
         
 
         if self.policy_type == "Gaussian":
@@ -55,56 +66,32 @@ class CBSAC(object):
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
     def density_pseudocount(self, s_tp1):
-        temp_density_model = copy.deepcopy(self.density_model)
-        optim = copy.deepcopy(self.density_optim)
-        prior = copy.deepcopy(self.prior)
-
+        tmp_flow = self.flow
+        optim = self.optimizer
         # fake update s_tp1
-        temp_density_model.train()
-        z, log_det_loss = temp_density_model.forward(s_tp1)
-        optim.zero_grad()
-        rho = prior.log_prob(z)
-        # print(z)
-        loss = rho + log_det_loss
-        loss = - loss.mean()
-        loss.backward()
-        optim.step()
-        print("rho",rho[0])
-
-        temp_density_model.eval()
-        # inference s_tp1
-        with torch.no_grad():
-            x, _ = temp_density_model.forward(s_tp1, reverse=True)
-            print(x.shape)
-            rho_ = prior.log_prob(x)
-            print("rho_", rho_[0])
-        
+        tmp_flow, loss, rho = self.density_update(s_tp1, tmp_flow, optim, update=True)
+        tmp_flow.eval()
+        # with torch.no_grad():
+        tmp_flow, loss_, rho_ = self.density_update(s_tp1, tmp_flow, optim, update=False)
         PG =  rho_ - rho
-        PG[PG<0] = 1e-7
-        # print("PG", PG)
-        N = (torch.exp(PG) - 1)
-        # print("N", N)
+        PG[PG<=0] = 1e-7
+        N = (torch.exp(PG.detach()) - 1)
         alpha = (1e-7 / N)
-        # print("alpha", alpha)
 
-        del temp_density_model
-        del optim
-        del prior
+
         return alpha.detach(), N.detach()
     
-    def density_update(self, s_t):
-        s_t = 0.05 + (1-0.05) * s_t # what is this step?
-        z, log_det_loss = self.density_model.forward(s_t)
-        self.density_optim.zero_grad()
-        # print("density update debug")
-        # print("det ", log_det_loss)
-        # print(z)
-        # print([self.prior.log_prob(z_) for z_ in z])
-        loss = self.prior.log_prob(z) + log_det_loss
-        loss = -loss.mean()
-        loss.backward()
-        self.density_optim.step()
-        return loss
+    def density_update(self, s_t, flow, optim=None, update=True):
+        if optim is None:
+            optim = self.optimizer
+        logp = flow.log_prob(s_t)
+        loss = -logp.mean()
+        
+        if update:
+            optim.zero_grad()
+            loss.backward(retain_graph=True)
+            optim.step()
+        return flow, loss, logp
 
     def select_action(self, state, evaluate=False):
         state = torch.FloatTensor(state).to(self.device).unsqueeze(0)
@@ -116,7 +103,7 @@ class CBSAC(object):
 
     def update_parameters(self, memory, batch_size, updates):
         # Sample a batch from memory
-        self.density_model.train()
+        # self.density_model.train()
         state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=batch_size)
 
         state_batch = torch.FloatTensor(state_batch).to(self.device)
@@ -131,7 +118,7 @@ class CBSAC(object):
             min_qf_next_target = torch.min(qf1_next_target, qf2_next_target) - self.alpha * next_state_log_pi
             next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
 
-        self.density_update(state_batch)
+        self.flow, _, _ = self.density_update(state_batch, self.flow)
         self.alpha, N = self.density_pseudocount(next_state_batch)
 
         qf1, qf2 = self.critic(state_batch, action_batch)  # Two Q-functions to mitigate positive bias in the policy improvement step
@@ -148,8 +135,8 @@ class CBSAC(object):
         qf1_pi, qf2_pi = self.critic(state_batch, pi)
         min_qf_pi = torch.min(qf1_pi, qf2_pi)
 
-        policy_loss = ((self.alpha * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
-
+        policy_loss = ((self.alpha.detach() * log_pi) - min_qf_pi).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
+        # print(policy_loss)
         self.policy_optim.zero_grad()
         policy_loss.backward()
         self.policy_optim.step()

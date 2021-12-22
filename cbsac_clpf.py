@@ -7,6 +7,10 @@ from model import GaussianPolicy, QNetwork, DeterministicPolicy
 from torch.distributions import MultivariateNormal
 from realnvp_layers import Net, AffineCouplingLayer
 import copy
+from clpf.argparser import parse_arguments
+from clpf.models.clpf import model_builder
+from clpf.data_tools.bm_sequential_batch import BMSequenceBatch
+from clpf.lib.utils import optimizer_factory, count_parameters, subsample_data
 
 class CBSAC(object):
     def __init__(self, num_inputs, action_space, args):
@@ -27,10 +31,22 @@ class CBSAC(object):
         self.critic_target = QNetwork(num_inputs, action_space.shape[0], args.hidden_size).to(self.device)
         hard_update(self.critic_target, self.critic)
 
-        self.prior = MultivariateNormal(torch.zeros(num_inputs), torch.eye(num_inputs))
-        # print(num_inputs)
-        self.density_model = Net(N=num_inputs*2, input_dim=num_inputs, hidden_dim=256, device=self.device).to(self.device)
-        self.density_optim = torch.optim.Adam(self.density_model.parameters(), lr=args.lr, weight_decay=5e-4)
+        ### Density initialization
+        config = parse_arguments() ## NOTE: probably needs to be changed
+        self.density_model = model_builder(config).to(self.device)
+        train_loader, val_loader = get_real_dataset(config)  ## NOTE: Need to be changed here!
+        data_preprocess = BMSequenceBatch.preprocess
+        trainable_parameters = self.density_model.parameters()
+        self.optimizer, num_params = optimizer_factory(config, trainable_parameters)
+        self.density_model = torch.nn.DataParallel(self.density_model)
+        
+
+
+
+        # self.prior = MultivariateNormal(torch.zeros(num_inputs), torch.eye(num_inputs))
+        # # print(num_inputs)
+        # self.density_model = model_builder(args)
+        # self.density_optim = torch.optim.Adam(self.density_model.parameters(), lr=args.lr, weight_decay=5e-4)
 
         if args.load_density_model:
             density_model_ckpt = torch.load(args.density_model_dir)
