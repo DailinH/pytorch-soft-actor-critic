@@ -32,7 +32,7 @@ parser.add_argument('--seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
 parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                     help='batch size (default: 256)')
-parser.add_argument('--num_steps', type=int, default=3000001, metavar='N',
+parser.add_argument('--num_steps', type=int, default=1000001, metavar='N',
                     help='maximum number of steps (default: 1000000)')
 parser.add_argument('--hidden_size', type=int, default=256, metavar='N',
                     help='hidden size (default: 256)')
@@ -68,12 +68,12 @@ agent = SAC(env.observation_space.shape[0], env.action_space, args)
 if args.load is not None:
     agent.load_checkpoint(args.load, evaluate=True)
 
-writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 if args.pseudocount:
     agent = CBSAC(env.observation_space.shape[0], env.action_space, args)
-    writer = SummaryWriter('runs/{}_CBSAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
+    writer = SummaryWriter('runs/{}/CBSAC/{}'.format(args.env_name,datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
+else:
+    writer = SummaryWriter('runs/{}/SAC{}/{}'.format(args.env_name,"_auto" if args.automatic_entropy_tuning else "", datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
+
 
 
 # Memory
