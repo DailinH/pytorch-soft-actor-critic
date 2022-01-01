@@ -95,11 +95,11 @@ class CBSAC(object):
             print("rho_", rho_[0])
         
         PG =  rho_ - rho
-        PG[PG<0] = 1e-7
+        PG[PG<0] = 1e-8
         # print("PG", PG)
         N = (torch.exp(PG) - 1)
         # print("N", N)
-        alpha = (1e-7 / N)
+        alpha = (1e-8 / N)
         # print("alpha", alpha)
 
         del temp_density_model

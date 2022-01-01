@@ -22,7 +22,7 @@ class CBSAC(object):
         self.target_update_interval = args.target_update_interval
         self.automatic_entropy_tuning = args.automatic_entropy_tuning
 
-        self.device = torch.device("cuda" if args.cuda else "cpu")
+        self.device = torch.device("cuda:{}".format(args.cuda))
 
         self.critic = QNetwork(num_inputs, action_space.shape[0], args.hidden_size).to(device=self.device)
         self.critic_optim = Adam(self.critic.parameters(), lr=args.lr)
@@ -32,8 +32,9 @@ class CBSAC(object):
 
         self.prior = MultivariateNormal(torch.zeros(num_inputs).to(self.device), torch.eye(num_inputs).to(self.device))
         # print(num_inputs)
-        nets = lambda: nn.Sequential(nn.Linear(num_inputs, 256), nn.LeakyReLU(), nn.Linear(256, 256), nn.LeakyReLU(), nn.Linear(256, num_inputs), nn.Tanh())
-        nett = lambda: nn.Sequential(nn.Linear(num_inputs, 256), nn.LeakyReLU(), nn.Linear(256, 256), nn.LeakyReLU(), nn.Linear(256, num_inputs))
+        dim = 256
+        nets = lambda: nn.Sequential(nn.Linear(num_inputs, dim), nn.LeakyReLU(), nn.Linear(dim, dim), nn.LeakyReLU(), nn.Linear(dim, num_inputs), nn.Tanh())
+        nett = lambda: nn.Sequential(nn.Linear(num_inputs, dim), nn.LeakyReLU(), nn.Linear(dim, dim), nn.LeakyReLU(), nn.Linear(dim, num_inputs))
         # self.density_model = Net(N=num_inputs*2, input_dim=num_inputs, hidden_dim=256, device=self.device).to(self.device)
         # self.density_optim = torch.optim.Adam(self.density_model.parameters(), lr=args.lr, weight_decay=5e-4)
         prior = distributions.MultivariateNormal(torch.zeros(num_inputs).to(self.device), torch.eye(num_inputs).to(self.device))
@@ -74,12 +75,11 @@ class CBSAC(object):
         # with torch.no_grad():
         tmp_flow, loss_, rho_ = self.density_update(s_tp1, tmp_flow, optim, update=False)
         PG =  rho_ - rho
-        PG[PG<=0] = 1e-7
-        N = (torch.exp(PG.detach()) - 1)
-        alpha = (1e-7 / N)
-
-
-        return alpha.detach(), N.detach()
+        PG[PG<=1e-7] = 1e-7
+        rN = (torch.exp(PG.detach()) - 1)
+        rN[rN >=1e7] = 1e7
+        alpha = rN * 1e-3
+        return alpha.detach(), rN.detach()
     
     def density_update(self, s_t, flow, optim=None, update=True):
         if optim is None:
@@ -159,7 +159,7 @@ class CBSAC(object):
         if updates % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
-        return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), torch.mean(N), torch.mean(self.alpha) #, alpha_loss.item(), alpha_tlogs.item()
+        return qf1_loss.item(), qf2_loss.item(), policy_loss.item(), torch.mean(N), torch.mean(self.alpha.float()) #, alpha_loss.item(), alpha_tlogs.item()
 
     # Save model parameters
     def save_checkpoint(self, env_name, suffix="", ckpt_path=None):

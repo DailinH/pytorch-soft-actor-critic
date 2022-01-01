@@ -19,8 +19,7 @@ parser.add_argument('--eval', type=bool, default=True,
                     help='Evaluates a policy a policy every 10 episode (default: True)')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor for reward (default: 0.99)')
-parser.add_argument('--tau', type=float, default=0.005, metavar='G',
-                    help='target smoothing coefficient(τ) (default: 0.005)')
+parser.add_argument('--tau', type=float,default=0.005,metavar='G',help='target smoothing coefficient(τ) (default: 0.005)')
 parser.add_argument('--lr', type=float, default=0.0003, metavar='G',
                     help='learning rate (default: 0.0003)')
 parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
@@ -44,8 +43,7 @@ parser.add_argument('--target_update_interval', type=int, default=1, metavar='N'
                     help='Value target update per no. of updates per step (default: 1)')
 parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
-parser.add_argument('--cuda', action="store_true",
-                    help='run on CUDA (default: False)')
+parser.add_argument('--cuda', type=int, default=0, help='run on CUDA (default: False)')
 parser.add_argument('--pseudocount', action="store_true",
                     help='hash pseudocount')
 parser.add_argument('--save', type=str, default=None)
@@ -126,7 +124,7 @@ for i_episode in itertools.count(1):
     if total_numsteps > args.num_steps:
         break
 
-    writer.add_scalar('reward/train', episode_reward, i_episode)
+    writer.add_scalar('reward/train', episode_reward, updates)
     print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
     if i_episode % 10 == 0 and args.eval is True:
@@ -148,7 +146,7 @@ for i_episode in itertools.count(1):
         avg_reward /= episodes
 
 
-        writer.add_scalar('avg_reward/test', avg_reward, i_episode)
+        writer.add_scalar('avg_reward/test', avg_reward, updates)
 
         print("----------------------------------------")
         print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
